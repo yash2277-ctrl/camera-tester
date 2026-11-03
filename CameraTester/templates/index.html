@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Camera Tester -- Discovery &amp; Live Preview</title>
+<style>
+  :root {
+    --bg: #0b1220; --panel: #121a2b; --panel2: #0e1526; --line: #22304d;
+    --text: #e7ecf5; --dim: #8fa3c0; --accent: #38bdf8; --ok: #34d399;
+    --warn: #fbbf24; --bad: #f87171;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font-family: "Segoe UI", Arial, sans-serif; }
+  header { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+           padding: 14px 22px; background: var(--panel);
+           border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; }
+  .brand { font-size: 20px; font-weight: 700; letter-spacing: .3px; }
+  .brand span { color: var(--accent); }
+  header input { background: var(--panel2); border: 1px solid var(--line); color: var(--text);
+                 padding: 8px 10px; border-radius: 8px; width: 190px; font-size: 14px; }
+  button, .btn { background: var(--accent); border: 0; color: #04121e; font-weight: 700;
+                 padding: 9px 16px; border-radius: 8px; cursor: pointer; font-size: 14px;
+                 text-decoration: none; display: inline-block; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.ghost, .btn.ghost { background: transparent; border: 1px solid var(--line);
+                 color: var(--dim); font-weight: 600; }
+  button.ghost:hover, .btn.ghost:hover { color: var(--text); border-color: var(--accent); }
+  #scanState { color: var(--dim); font-size: 13px; }
+  #progress { padding: 8px 22px; font: 12px/1.6 Consolas, monospace; color: var(--dim);
+              white-space: pre-line; min-height: 20px; }
+  main { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+         gap: 18px; padding: 18px 22px 60px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+          overflow: hidden; display: flex; flex-direction: column; }
+  .preview { position: relative; aspect-ratio: 16/9; background: #060a12;
+             display: flex; align-items: center; justify-content: center; }
+  .preview img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .preview .idle { color: var(--dim); font-size: 13px; text-align: center; line-height: 1.8; }
+  .preview .idle .big { font-size: 34px; display: block; opacity: .6; }
+  .pill { position: absolute; top: 10px; left: 10px; font-size: 11px; font-weight: 700;
+          padding: 3px 9px; border-radius: 999px; background: #0009; letter-spacing: .4px; }
+  .pill.live { color: var(--ok); border: 1px solid var(--ok); }
+  .pill.probing { color: var(--accent); border: 1px solid var(--accent); }
+  .pill.found { color: var(--dim); border: 1px solid var(--dim); }
+  .pill.saved { color: var(--dim); border: 1px dashed var(--dim); }
+  .pill.no-preview { color: var(--warn); border: 1px solid var(--warn); }
+  .pill.offline { color: var(--bad); border: 1px solid var(--bad); }
+  .pill.error { color: var(--bad); border: 1px solid var(--bad); }
+  .body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+  .title { font-weight: 700; font-size: 15px; }
+  .meta { color: var(--dim); font-size: 12.5px; line-height: 1.65; word-break: break-all; }
+  .meta b { color: var(--text); font-weight: 600; }
+  .badges { display: flex; gap: 6px; flex-wrap: wrap; }
+  .badge { font-size: 11px; font-weight: 700; color: var(--accent);
+           border: 1px solid var(--line); background: var(--panel2);
+           padding: 2px 8px; border-radius: 999px; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: auto; }
+  .actions button, .actions .btn { padding: 7px 12px; font-size: 13px; }
+  details { border-top: 1px dashed var(--line); padding-top: 8px; margin-top: 4px; }
+  summary { cursor: pointer; color: var(--dim); font-size: 12.5px; }
+  .creds { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .creds input { background: var(--panel2); border: 1px solid var(--line); color: var(--text);
+                 padding: 6px 8px; border-radius: 6px; font-size: 12.5px; }
+  .hint { color: var(--warn); font-size: 12px; }
+  .empty { grid-column: 1/-1; text-align: center; color: var(--dim); padding: 70px 0; }
+  .empty .big { font-size: 44px; display: block; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">Camera <span>Tester</span></div>
+  <input id="subnet" placeholder="192.168.1.0/24" spellcheck="false">
+  <button id="scanBtn">Scan Network</button>
+  <button id="testAllBtn" class="ghost">Re-test all streams</button>
+  <button id="stopAllBtn" class="ghost">Stop all streams</button>
+  <span id="scanState"></span>
+  <span style="flex:1"></span>
+  <input id="guser" placeholder="global username" spellcheck="false" style="width:130px">
+  <input id="gpass" type="password" placeholder="global password" style="width:130px">
+  <button id="gSave" class="ghost">Use for all</button>
+  <a class="btn ghost" href="/report.csv" target="_blank">CSV</a>
+  <a class="btn ghost" href="/report.json" target="_blank">JSON</a>
+  <a class="btn ghost" href="/report.html" target="_blank">HTML</a>
+</header>
+<div id="progress"></div>
+<main id="grid">
+  <div class="empty" id="empty">
+    <span class="big">&#128249;</span>
+    No cameras yet. Press <b>Scan Network</b> to search for ONVIF / RTSP cameras
+    and local webcams. Cameras with a working stream will start previewing automatically.
+  </div>
+</main>
+
+<script>
+const grid = document.getElementById("grid");
+const emptyMsg = document.getElementById("empty");
+const cards = new Map();          // id -> {root, refs}
+const forcedPreview = new Set();  // ids the user manually started
+
+function esc(s) { return String(s ?? "").replace(/[&<>"]/g,
+  c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c])); }
+
+async function api(path, body) {
+  const res = await fetch(path, body ? {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body) } : {});
+  return res.json().catch(() => ({}));
+}
+
+function statusPill(cam) {
+  const st = cam.stream ? cam.stream.status : cam.status;
+  return st;
+}
+
+function buildCard(cam) {
+  const root = document.createElement("div");
+  root.className = "card";
+  root.innerHTML = `
+    <div class="preview">
+      <div class="idle"><span class="big">&#128269;</span>
+        <span class="idle-text">not streaming</span></div>
+      <span class="pill"></span>
+    </div>
+    <div class="body">
+      <div class="title"></div>
+      <div class="badges"></div>
+      <div class="meta"></div>
+      <div class="hint"></div>
+      <div class="actions">
+        <button class="preview-btn">Preview</button>
+        <button class="stop-btn">Stop</button>
+        <button class="test-btn">Test streams</button>
+        <a class="btn ghost full-btn" target="_blank">Full view</a>
+        <a class="btn ghost snap-btn" target="_blank">Snapshot</a>
+      </div>
+      ${cam.kind === "network" ? `
+      <details><summary>Camera credentials (if stream needs login)</summary>
+        <div class="creds">
+          <input class="u" placeholder="username">
+          <input class="p" type="password" placeholder="password">
+          <button class="save-creds">Save &amp; test</button>
+        </div>
+      </details>` : ""}
+    </div>`;
+
+  const $ = sel => root.querySelector(sel);
+  const refs = {
+    preview: $(".preview"), idle: $(".idle"), idleText: $(".idle-text"),
+    pill: $(".pill"), title: $(".title"), badges: $(".badges"), meta: $(".meta"),
+    hint: $(".hint"), previewBtn: $(".preview-btn"), stopBtn: $(".stop-btn"),
+    testBtn: $(".test-btn"), fullBtn: $(".full-btn"), snapBtn: $(".snap-btn"),
+  };
+
+  refs.previewBtn.onclick = async () => {
+    forcedPreview.add(cam.id);
+    await api(`/api/start/${cam.id}`, {});   // clears user_stopped + starts capture
+    attachImage(cam.id, true);
+    refresh();
+  };
+  refs.stopBtn.onclick = async () => {
+    forcedPreview.delete(cam.id);
+    const img = refs.preview.querySelector("img");
+    if (img) img.remove();
+    entry.img = null;
+    refs.idle.style.display = "";
+    await api(`/api/stop/${cam.id}`, {});
+    refresh();
+  };
+  refs.testBtn.onclick = async () => {
+    refs.testBtn.disabled = true;
+    await api(`/api/test/${cam.id}`, {});
+    refresh();
+  };
+  const saveBtn = root.querySelector(".save-creds");
+  if (saveBtn) saveBtn.onclick = async () => {
+    await api(`/api/creds/${cam.id}`, {
+      username: root.querySelector(".u").value,
+      password: root.querySelector(".p").value });
+    saveBtn.textContent = "Saved!";
+    setTimeout(() => saveBtn.textContent = "Save & test", 1500);
+  };
+
+  grid.appendChild(root);
+  const entry = { root, refs, img: null };
+  cards.set(cam.id, entry);
+  return entry;
+}
+
+function attachImage(camId, force) {
+  const entry = cards.get(camId);
+  if (!entry) return;
+  if (entry.img) return;
+  const cam = entry.cam || {};
+  const st = entry.lastStatus;
+  const canAuto = st === "live" && !cam.user_stopped;
+  if (!canAuto && !force) return;
+  const img = document.createElement("img");
+  img.src = `/video/${camId}`;
+  img.alt = camId;
+  entry.refs.preview.appendChild(img);
+  entry.refs.idle.style.display = "none";
+  entry.img = img;
+}
+
+function updateCard(cam) {
+  let entry = cards.get(cam.id) || buildCard(cam);
+  const r = entry.refs;
+  const streamStatus = cam.stream ? cam.stream.status : null;
+  const shownStatus = streamStatus || cam.status;
+  entry.lastStatus = shownStatus;
+  entry.cam = cam;
+
+  // Server dropped the capture (Stop pressed, or network changed):
+  // detach the old <img> so a fresh one is attached when it goes live again.
+  if (!cam.stream && entry.img && shownStatus !== "live") {
+    entry.img.remove();
+    entry.img = null;
+    entry.refs.idle.style.display = "";
+    forcedPreview.delete(cam.id);
+  }
+
+  r.title.textContent = cam.name;
+  r.badges.innerHTML = cam.protocols.map(p => `<span class="badge">${esc(p)}</span>`).join("");
+  r.fullBtn.href = `/view/${cam.id}`;
+  r.snapBtn.href = `/snapshot/${cam.id}`;
+
+  const streamUrl = cam.stream_url
+    ? `<b>Stream:</b> ${esc(cam.stream_url)}<br>`
+    : (cam.kind === "network" ? `<b>Stream:</b> not found yet -- run "Test streams"<br>` : "");
+  r.meta.innerHTML =
+    `<b>IP:</b> ${esc(cam.ip)}${cam.port ? ":" + cam.port : ""} &nbsp; ` +
+    `<b>Device:</b> ${esc(cam.device_url || cam.server || "-")}<br>` +
+    streamUrl +
+    (cam.cred_used ? `<b>Auth:</b> ${esc(cam.cred_used)}<br>` : "") +
+    (cam.last_seen ? `<b>Last seen:</b> ${esc(cam.last_seen)}<br>` : "") +
+    (cam.stream && cam.stream.frames ? `<b>Frames:</b> ${cam.stream.frames}` : "");
+
+  r.hint.textContent =
+    cam.error_hint && (cam.status === "no-preview" || cam.status === "saved" ||
+                       cam.status === "offline")
+      ? cam.error_hint : "";
+  r.pill.className = "pill " + esc(shownStatus);
+  r.pill.textContent = shownStatus === "live" ? "LIVE" : shownStatus.toUpperCase();
+
+  if (shownStatus === "live" || forcedPreview.has(cam.id)) attachImage(cam.id, false);
+
+  // keep buttons meaningful
+  r.previewBtn.disabled = cam.kind === "network" && !cam.stream_url && cam.status !== "live";
+  r.previewBtn.textContent = entry.img ? "Restart preview" : "Preview";
+  r.stopBtn.disabled = !entry.img;
+  r.testBtn.disabled = cam.status === "probing";
+  if (emptyMsg) emptyMsg.style.display = "none";
+}
+
+function removeStale(cams) {
+  for (const [id, entry] of cards) {
+    if (!cams.find(c => c.id === id)) { entry.root.remove(); cards.delete(id); }
+  }
+  if (!cards.size && emptyMsg) emptyMsg.style.display = "";
+}
+
+let scanning = false;
+async function refresh() {
+  try {
+    const data = await fetch("/api/cameras").then(r => r.json());
+    document.getElementById("progress").textContent =
+      (data.scan.progress || []).slice(-4).join("\n");
+    document.getElementById("subnet").value = data.scan.subnet || "";
+    const nowScanning = data.scan.scanning;
+    if (nowScanning !== scanning) {
+      scanning = nowScanning;
+      document.getElementById("scanBtn").disabled = scanning;
+      document.getElementById("scanBtn").textContent = scanning ? "Scanning..." : "Scan Network";
+    }
+    document.getElementById("scanState").textContent =
+      (data.scan.subnet ? `net: ${data.scan.subnet}` : "") +
+      (data.scan.last_scan ? `  ·  last scan: ${data.scan.last_scan}` : "");
+    removeStale(data.cameras);
+    data.cameras.forEach(updateCard);
+  } catch (e) { /* server restarting */ }
+}
+
+document.getElementById("scanBtn").onclick = async () => {
+  document.getElementById("scanBtn").disabled = true;
+  await api("/api/scan", { subnet: document.getElementById("subnet").value });
+  refresh();
+};
+document.getElementById("testAllBtn").onclick = async () => {
+  document.getElementById("testAllBtn").disabled = true;
+  await api("/api/test_all", {});
+  setTimeout(() => document.getElementById("testAllBtn").disabled = false, 3000);
+  refresh();
+};
+document.getElementById("gSave").onclick = async () => {
+  const btn = document.getElementById("gSave");
+  await api("/api/global_creds", {
+    username: document.getElementById("guser").value,
+    password: document.getElementById("gpass").value });
+  btn.textContent = "Saved!";
+  setTimeout(() => btn.textContent = "Use for all", 1500);
+  await api("/api/test_all", {});
+  refresh();
+};
+document.getElementById("stopAllBtn").onclick = async () => {
+  forcedPreview.clear();
+  await api("/api/stop_all", {});
+  for (const entry of cards.values()) {
+    const img = entry.refs.preview.querySelector("img");
+    if (img) img.remove();
+    entry.img = null;
+    entry.refs.idle.style.display = "";
+  }
+};
+
+refresh();
+fetch("/api/config").then(r => r.json()).then(c => {
+  if (c.global_user) document.getElementById("guser").value = c.global_user;
+}).catch(() => {});
+setInterval(refresh, 1200);
+</script>
+</body>
+</html>
